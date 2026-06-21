@@ -1,9 +1,7 @@
-name: Build APK (debug)
+name: Build APK (depuis le zip)
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -15,17 +13,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # VÃ©rifie que le projet est bien Ã  la racine du dÃ©pÃ´t.
-      - name: VÃ©rifier la structure du projet
+      # GitHub ne dÃ©compresse pas le zip : on le fait ici.
+      - name: DÃ©compresser le projet depuis le zip
         run: |
-          if [ ! -f "app/build.gradle" ] && [ ! -f "app/build.gradle.kts" ]; then
-            echo "::error::Dossier 'app/' introuvable Ã  la racine du dÃ©pÃ´t."
-            echo "On doit voir app/, settings.gradle, .github/ Ã  la racine."
-            echo "----- Contenu actuel de la racine : -----"
+          ZIP=$(ls *.zip 2>/dev/null | head -n1)
+          if [ -z "$ZIP" ]; then
+            echo "::error::Aucun fichier .zip trouvÃ© Ã  la racine du dÃ©pÃ´t."
+            echo "Envoie AntiTheftApp.zip Ã  la racine, puis relance."
             ls -la
             exit 1
           fi
-          echo "Structure OK : 'app/' trouvÃ©."
+          echo "Zip trouvÃ© : $ZIP"
+          unzip -o "$ZIP" -d _extracted >/dev/null
+
+          SETTINGS=$(find _extracted -name "settings.gradle*" | head -n1)
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::settings.gradle introuvable dans le zip (zip incomplet ?)."
+            find _extracted -maxdepth 2 -type f
+            exit 1
+          fi
+          ROOT=$(dirname "$SETTINGS")
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+          echo "Projet dÃ©tectÃ© dans : $ROOT"
+          ls -la "$ROOT"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -33,18 +43,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Installe Gradle 8.7 : pas besoin du wrapper jar committÃ©.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
       - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: antitheft-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
